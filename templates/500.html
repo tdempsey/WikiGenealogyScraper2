@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block title %} - Server Error{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 text-center">
+        <div class="error-container py-5">
+            <h1 class="display-1 text-muted">500</h1>
+            <h2 class="mb-4">Server Error</h2>
+            <p class="lead mb-4">
+                Something went wrong on our end. Please try again later or contact the administrator if the problem persists.
+            </p>
+            <a href="/" class="btn btn-primary">
+                <i class="fas fa-home me-2"></i>Return to Home
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "layout.html" %}
+
+{% block title %} - Search{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <h1 class="mb-4">Search for People</h1>
+        
+        <div class="search-container mb-5">
+            <form id="search-form" class="mb-4">
+                <div class="input-group input-group-lg">
+                    <input type="text" class="form-control" id="search-input" 
+                           placeholder="Enter a name (e.g., Albert Einstein, Queen Victoria)" 
+                           aria-label="Search query">
+                    <button class="btn btn-primary" type="submit">
+                        <i class="fas fa-search me-2"></i>Search
+                    </button>
+                </div>
+            </form>
+            
+            <div class="search-tips mb-4">
+                <h5>Search Tips:</h5>
+                <ul>
+                    <li>Use full names for better results (e.g., "Albert Einstein" instead of just "Einstein")</li>
+                    <li>Include titles for royalty or nobility (e.g., "Queen Elizabeth II", "King Henry VIII")</li>
+                    <li>For common names, add identifying information (e.g., "George Washington President")</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="loading-indicator" class="text-center d-none">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Searching Wikidata...</p>
+        </div>
+        
+        <div id="results-container" class="d-none">
+            <h2 id="results-heading">Search Results</h2>
+            <div id="results-list" class="mt-4"></div>
+            
+            <nav aria-label="Search results pagination">
+                <ul class="pagination justify-content-center mt-4" id="pagination">
+                    <!-- Pagination will be inserted here by JavaScript -->
+                </ul>
+            </nav>
+        </div>
+        
+        <div id="no-results" class="alert alert-info d-none" role="alert">
+            <i class="fas fa-info-circle me-2"></i>
+            No results found. Please try a different search term.
+        </div>
+        
+        <div id="error-message" class="alert alert-danger d-none" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <span id="error-text"></span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/search.js') }}"></script>
+<script>
+    // Initialize search with query parameter if present
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const query = urlParams.get('query');
+        
+        if (query) {
+            document.getElementById('search-input').value = query;
+            performSearch(query, 1);
+        }
+    });
+</script>
+{% endblock %}
