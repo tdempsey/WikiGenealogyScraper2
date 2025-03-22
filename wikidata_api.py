@@ -304,8 +304,8 @@ def get_family_relations(entity_id):
         # Children query
         children_query = f"""
         SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Children
-          ?relation wdt:P40 wd:{entity_id} .
+          # Children - person is parent of relation
+          wd:{entity_id} wdt:P40 ?relation .
           
           # Get additional details about the relation
           OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
