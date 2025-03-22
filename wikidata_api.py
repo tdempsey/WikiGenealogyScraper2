@@ -227,96 +227,30 @@ def get_family_relations(entity_id):
         dict: Family relations categorized by type
     """
     try:
-        # Use SPARQL to query for family relations
-        # Define relationship property IDs
-        parent_props = ['P22', 'P25']  # father, mother
-        child_props = ['P40']  # child
-        spouse_props = ['P26']  # spouse
-        sibling_props = ['P3373']  # sibling
-        
-        # Create a simpler SPARQL query that still retrieves all relation types
-        query = f"""
-        SELECT DISTINCT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Define the relationship types we want
-          VALUES (?rel ?relationType) {{
-            (wdt:P22 "parent") 
-            (wdt:P25 "parent")
-            (wdt:P40 "child")
-            (wdt:P26 "spouse")
-            (wdt:P3373 "sibling")
-          }}
-          
-          # For parent-child relationships
-          {{
-            # Parents (person -[has parent]-> relation)
-            wd:{entity_id} ?rel ?relation .
-            FILTER(?rel IN (wdt:P22, wdt:P25))
-          }} UNION {{
-            # Children (relation -[has parent]-> person)
-            ?relation ?rel wd:{entity_id} .
-            FILTER(?rel = wdt:P40)
-          }} UNION {{
-            # Spouses (bi-directional)
-            {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
-            FILTER(?rel = wdt:P26)
-          }} UNION {{
-            # Siblings (bi-directional)
-            {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
-            FILTER(?rel = wdt:P3373)
-          }}
-          
-          # Get additional details about the relation
-          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
-          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
-          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
-          OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
-          
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-        }}
-        """
-        
-        # Make the SPARQL request
-        headers = {
-            'Accept': 'application/sparql-results+json',
-            'User-Agent': 'WikidataGenealogyApp/1.0'
-        }
-        
-        params = {
-            'query': query,
-            'format': 'json'
-        }
-        
-        response = requests.get(WIKIDATA_SPARQL_URL, headers=headers, params=params)
-        response.raise_for_status()
-        results = response.json()
-        
-        # Process results
-        relations = {
-            'parents': [],
-            'children': [],
-            'spouses': [],
-            'siblings': []
-        }
-        
-        processed_ids = set()  # To avoid duplicates
-        
-        for binding in results.get('results', {}).get('bindings', []):
+        # Helper method to execute SPARQL query and parse results
+        def execute_wikidata_query(query):
+            headers = {
+                'Accept': 'application/sparql-results+json',
+                'User-Agent': 'WikidataGenealogyApp/1.0'
+            }
+            
+            params = {
+                'query': query,
+                'format': 'json'
+            }
+            
+            response = requests.get(WIKIDATA_SPARQL_URL, headers=headers, params=params)
+            response.raise_for_status()
+            return response.json().get('results', {}).get('bindings', [])
+            
+        # Helper method to process a binding into a relation object
+        def process_binding(binding, relation_type):
             relation_uri = binding.get('relation', {}).get('value', '')
             if not relation_uri:
-                continue
+                return None
                 
             # Extract Q-ID from URI (e.g., http://www.wikidata.org/entity/Q123 -> Q123)
             relation_id = relation_uri.split('/')[-1]
-            
-            # Skip if we've already processed this relation
-            relation_type = binding.get('relationType', {}).get('value')
-            relation_key = f"{relation_id}_{relation_type}"
-            if relation_key in processed_ids:
-                continue
-            processed_ids.add(relation_key)
             
             # Create relation object
             relation = {
@@ -343,33 +277,132 @@ def get_family_relations(entity_id):
                 
             if 'relationDescription' in binding:
                 relation['description'] = binding['relationDescription']['value']
-            
-            # Add to appropriate category
-            if relation_type in ['parent', 'father', 'mother']:
-                # Add to parents category
-                if relation_type == 'father' or relation_type == 'mother':
-                    relation['parent_type'] = relation_type
-                relation_key = relation_id
                 
-                # Check if already exists in parents list
-                existing = next((r for r in relations['parents'] if r['id'] == relation_id), None)
-                if not existing:
-                    relations['parents'].append(relation)
-            elif relation_type == 'child':
-                # Check if already exists in children list
-                existing = next((r for r in relations['children'] if r['id'] == relation_id), None)
-                if not existing:
-                    relations['children'].append(relation)
-            elif relation_type == 'spouse':
-                # Check if already exists in spouses list
-                existing = next((r for r in relations['spouses'] if r['id'] == relation_id), None)
-                if not existing:
-                    relations['spouses'].append(relation)
-            elif relation_type == 'sibling':
-                # Check if already exists in siblings list
-                existing = next((r for r in relations['siblings'] if r['id'] == relation_id), None)
-                if not existing:
-                    relations['siblings'].append(relation)
+            return relation
+            
+        # Create simpler individual queries for each relationship type
+        
+        # Parents query (mother + father)
+        parents_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          # Parents
+          {{ wd:{entity_id} wdt:P22 ?relation }} UNION {{ wd:{entity_id} wdt:P25 ?relation }}
+          
+          # Get additional details about the relation
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                     ?genderEntity rdfs:label ?relationGender . 
+                     FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                     FILTER(LANG(?relationDescription) = "en") }}
+          
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Children query
+        children_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          # Children
+          ?relation wdt:P40 wd:{entity_id} .
+          
+          # Get additional details about the relation
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                     ?genderEntity rdfs:label ?relationGender . 
+                     FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                     FILTER(LANG(?relationDescription) = "en") }}
+          
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Spouses query
+        spouses_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          # Spouses (bi-directional)
+          {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
+          
+          # Get additional details about the relation
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                     ?genderEntity rdfs:label ?relationGender . 
+                     FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                     FILTER(LANG(?relationDescription) = "en") }}
+          
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Siblings query
+        siblings_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          # Siblings (bi-directional)
+          {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
+          
+          # Get additional details about the relation
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                     ?genderEntity rdfs:label ?relationGender . 
+                     FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                     FILTER(LANG(?relationDescription) = "en") }}
+          
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Execute the queries separately and combine results
+        parents_results = execute_wikidata_query(parents_query)
+        children_results = execute_wikidata_query(children_query)
+        spouses_results = execute_wikidata_query(spouses_query)
+        siblings_results = execute_wikidata_query(siblings_query)
+        
+        # Initialize the result dictionary
+        relations = {
+            'parents': [],
+            'children': [],
+            'spouses': [],
+            'siblings': []
+        }
+        
+        # Process parents
+        seen_parent_ids = set()
+        for binding in parents_results:
+            relation = process_binding(binding, 'parent')
+            if relation and relation['id'] not in seen_parent_ids:
+                seen_parent_ids.add(relation['id'])
+                relations['parents'].append(relation)
+        
+        # Process children
+        seen_child_ids = set()
+        for binding in children_results:
+            relation = process_binding(binding, 'child')
+            if relation and relation['id'] not in seen_child_ids:
+                seen_child_ids.add(relation['id'])
+                relations['children'].append(relation)
+        
+        # Process spouses
+        seen_spouse_ids = set()
+        for binding in spouses_results:
+            relation = process_binding(binding, 'spouse')
+            if relation and relation['id'] not in seen_spouse_ids:
+                seen_spouse_ids.add(relation['id'])
+                relations['spouses'].append(relation)
+        
+        # Process siblings
+        seen_sibling_ids = set()
+        for binding in siblings_results:
+            relation = process_binding(binding, 'sibling')
+            if relation and relation['id'] not in seen_sibling_ids:
+                seen_sibling_ids.add(relation['id'])
+                relations['siblings'].append(relation)
         
         return relations
         
