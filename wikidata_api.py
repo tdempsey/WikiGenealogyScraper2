@@ -56,9 +56,18 @@ def search_person(query, page=1, limit=10):
             
             results.append(person)
         
+        # The structure of Wikidata API response sometimes varies
+        # The 'total' might be in 'search-continue' or directly in 'searchinfo'
+        total_results = len(results)
+        search_continue = data.get('search-continue')
+        if search_continue and isinstance(search_continue, dict):
+            total_results = search_continue.get('total', total_results)
+        elif data.get('searchinfo') and isinstance(data.get('searchinfo'), dict):
+            total_results = data.get('searchinfo').get('totalhits', total_results)
+            
         return {
             'results': results,
-            'total': data.get('search-continue', {}).get('total', len(results)),
+            'total': total_results,
             'page': page,
             'limit': limit
         }
