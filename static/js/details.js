@@ -177,6 +177,14 @@ function displayFamilyRelations(familyData) {
         siblings: []
     };
     
+    // Track seen IDs to avoid duplicates
+    const seenIds = {
+        parents: new Set(),
+        children: new Set(),
+        spouses: new Set(),
+        siblings: new Set()
+    };
+    
     // Find direct relations using links
     familyData.links.forEach(link => {
         // Skip links not directly connected to central person
@@ -193,15 +201,27 @@ function displayFamilyRelations(familyData) {
         if (relationType === 'parent') {
             // If central person is the target, then the source is a parent
             if (link.target === centralPerson.id) {
-                relations.parents.push(relatedPerson);
+                if (!seenIds.parents.has(relatedId)) {
+                    seenIds.parents.add(relatedId);
+                    relations.parents.push(relatedPerson);
+                }
             } else {
                 // If central person is the source, then the target is a child
-                relations.children.push(relatedPerson);
+                if (!seenIds.children.has(relatedId)) {
+                    seenIds.children.add(relatedId);
+                    relations.children.push(relatedPerson);
+                }
             }
         } else if (relationType === 'spouse') {
-            relations.spouses.push(relatedPerson);
+            if (!seenIds.spouses.has(relatedId)) {
+                seenIds.spouses.add(relatedId);
+                relations.spouses.push(relatedPerson);
+            }
         } else if (relationType === 'sibling') {
-            relations.siblings.push(relatedPerson);
+            if (!seenIds.siblings.has(relatedId)) {
+                seenIds.siblings.add(relatedId);
+                relations.siblings.push(relatedPerson);
+            }
         }
     });
     
