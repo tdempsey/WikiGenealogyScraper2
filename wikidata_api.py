@@ -237,26 +237,25 @@ def get_family_relations(entity_id):
         # Create SPARQL query for all relations
         # Note: Must use 'wdt:' prefix for properties in the query (direct statements)
         query = f"""
-        SELECT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+        SELECT DISTINCT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
           # Parents
           {{
             VALUES ?relationType {{ "parent" }}
-            VALUES ?rel {{ wdt:P22 wdt:P25 }}
-            wd:{entity_id} ?rel ?relation .
+            # Father
+            {{ wd:{entity_id} wdt:P22 ?relation }}
+            # Mother
+            UNION {{ wd:{entity_id} wdt:P25 ?relation }}
           }} UNION {{
             # Children
             VALUES ?relationType {{ "child" }}
-            VALUES ?rel {{ wdt:P40 }}
-            ?relation ?rel wd:{entity_id} .
+            ?relation wdt:P40 wd:{entity_id} .
           }} UNION {{
             # Spouses
             VALUES ?relationType {{ "spouse" }}
-            VALUES ?rel {{ wdt:P26 }}
             {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
           }} UNION {{
             # Siblings
             VALUES ?relationType {{ "sibling" }}
-            VALUES ?rel {{ wdt:P3373 }}
             {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
           }}
           OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
