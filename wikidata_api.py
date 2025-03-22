@@ -235,28 +235,29 @@ def get_family_relations(entity_id):
         sibling_props = ['P3373']  # sibling
         
         # Create SPARQL query for all relations
+        # Note: Must use 'wdt:' prefix for properties in the query (direct statements)
         query = f"""
         SELECT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
           # Parents
           {{
             VALUES ?relationType {{ "parent" }}
-            VALUES ?rel {{ wd:P22 wd:P25 }}
+            VALUES ?rel {{ wdt:P22 wdt:P25 }}
             wd:{entity_id} ?rel ?relation .
           }} UNION {{
             # Children
             VALUES ?relationType {{ "child" }}
-            VALUES ?rel {{ wd:P40 }}
+            VALUES ?rel {{ wdt:P40 }}
             ?relation ?rel wd:{entity_id} .
           }} UNION {{
             # Spouses
             VALUES ?relationType {{ "spouse" }}
-            VALUES ?rel {{ wd:P26 }}
-            {{ wd:{entity_id} wd:P26 ?relation }} UNION {{ ?relation wd:P26 wd:{entity_id} }}
+            VALUES ?rel {{ wdt:P26 }}
+            {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
           }} UNION {{
             # Siblings
             VALUES ?relationType {{ "sibling" }}
-            VALUES ?rel {{ wd:P3373 }}
-            {{ wd:{entity_id} wd:P3373 ?relation }} UNION {{ ?relation wd:P3373 wd:{entity_id} }}
+            VALUES ?rel {{ wdt:P3373 }}
+            {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
           }}
           OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
           OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
