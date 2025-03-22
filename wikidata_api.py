@@ -234,38 +234,147 @@ def get_family_relations(entity_id):
         spouse_props = ['P26']  # spouse
         sibling_props = ['P3373']  # sibling
         
-        # Create SPARQL query for all relations
-        # Note: Must use 'wdt:' prefix for properties in the query (direct statements)
-        query = f"""
-        SELECT DISTINCT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Parents
-          {{
-            VALUES ?relationType {{ "parent" }}
-            # Father
-            {{ wd:{entity_id} wdt:P22 ?relation }}
-            # Mother
-            UNION {{ wd:{entity_id} wdt:P25 ?relation }}
-          }} UNION {{
-            # Children
-            VALUES ?relationType {{ "child" }}
-            ?relation wdt:P40 wd:{entity_id} .
-          }} UNION {{
-            # Spouses
-            VALUES ?relationType {{ "spouse" }}
-            {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
-          }} UNION {{
-            # Siblings
-            VALUES ?relationType {{ "sibling" }}
-            {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
-          }}
+        # Create separate SPARQL queries for each relation type to avoid duplicates
+        
+        # Father query
+        father_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          wd:{entity_id} wdt:P22 ?relation .
           OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
           OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
           OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
+                    ?genderEntity rdfs:label ?relationGender . 
+                    FILTER(LANG(?relationGender) = "en") }}
           OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
+                    FILTER(LANG(?relationDescription) = "en") }}
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Mother query
+        mother_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          wd:{entity_id} wdt:P25 ?relation .
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                    ?genderEntity rdfs:label ?relationGender . 
+                    FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                    FILTER(LANG(?relationDescription) = "en") }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Children query
+        children_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          ?relation wdt:P40 wd:{entity_id} .
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                    ?genderEntity rdfs:label ?relationGender . 
+                    FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                    FILTER(LANG(?relationDescription) = "en") }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Spouse query
+        spouse_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                    ?genderEntity rdfs:label ?relationGender . 
+                    FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                    FILTER(LANG(?relationDescription) = "en") }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Sibling query
+        sibling_query = f"""
+        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
+          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                    ?genderEntity rdfs:label ?relationGender . 
+                    FILTER(LANG(?relationGender) = "en") }}
+          OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                    FILTER(LANG(?relationDescription) = "en") }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        # Use a single query for all relationships with explicit types
+        query = f"""
+        SELECT ?relation ?relationLabel ?relationType ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
+          {{
+            SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription "father" as ?relationType WHERE {{
+              wd:{entity_id} wdt:P22 ?relation .
+              OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+              OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+              OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                        ?genderEntity rdfs:label ?relationGender . 
+                        FILTER(LANG(?relationGender) = "en") }}
+              OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                        FILTER(LANG(?relationDescription) = "en") }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+            }}
+          }} UNION {{
+            SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription "mother" as ?relationType WHERE {{
+              wd:{entity_id} wdt:P25 ?relation .
+              OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+              OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+              OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                        ?genderEntity rdfs:label ?relationGender . 
+                        FILTER(LANG(?relationGender) = "en") }}
+              OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                        FILTER(LANG(?relationDescription) = "en") }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+            }}
+          }} UNION {{
+            SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription "child" as ?relationType WHERE {{
+              ?relation wdt:P40 wd:{entity_id} .
+              OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+              OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+              OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                        ?genderEntity rdfs:label ?relationGender . 
+                        FILTER(LANG(?relationGender) = "en") }}
+              OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                        FILTER(LANG(?relationDescription) = "en") }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+            }}
+          }} UNION {{
+            SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription "spouse" as ?relationType WHERE {{
+              {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
+              OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+              OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+              OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                        ?genderEntity rdfs:label ?relationGender . 
+                        FILTER(LANG(?relationGender) = "en") }}
+              OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                        FILTER(LANG(?relationDescription) = "en") }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+            }}
+          }} UNION {{
+            SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription "sibling" as ?relationType WHERE {{
+              {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
+              OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
+              OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
+              OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
+                        ?genderEntity rdfs:label ?relationGender . 
+                        FILTER(LANG(?relationGender) = "en") }}
+              OPTIONAL {{ ?relation schema:description ?relationDescription . 
+                        FILTER(LANG(?relationDescription) = "en") }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+            }}
+          }}
         }}
         """
         
@@ -336,14 +445,31 @@ def get_family_relations(entity_id):
                 relation['description'] = binding['relationDescription']['value']
             
             # Add to appropriate category
-            if relation_type == 'parent':
-                relations['parents'].append(relation)
+            if relation_type in ['parent', 'father', 'mother']:
+                # Add to parents category
+                if relation_type == 'father' or relation_type == 'mother':
+                    relation['parent_type'] = relation_type
+                relation_key = relation_id
+                
+                # Check if already exists in parents list
+                existing = next((r for r in relations['parents'] if r['id'] == relation_id), None)
+                if not existing:
+                    relations['parents'].append(relation)
             elif relation_type == 'child':
-                relations['children'].append(relation)
+                # Check if already exists in children list
+                existing = next((r for r in relations['children'] if r['id'] == relation_id), None)
+                if not existing:
+                    relations['children'].append(relation)
             elif relation_type == 'spouse':
-                relations['spouses'].append(relation)
+                # Check if already exists in spouses list
+                existing = next((r for r in relations['spouses'] if r['id'] == relation_id), None)
+                if not existing:
+                    relations['spouses'].append(relation)
             elif relation_type == 'sibling':
-                relations['siblings'].append(relation)
+                # Check if already exists in siblings list
+                existing = next((r for r in relations['siblings'] if r['id'] == relation_id), None)
+                if not existing:
+                    relations['siblings'].append(relation)
         
         return relations
         
