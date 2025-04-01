@@ -1,0 +1,299 @@
+{% extends "layout.html" %}
+
+{% block title %}Batch Scraper - Genealogy Research Tool{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2 class="mb-4">
+            <i class="fas fa-database text-primary mr-2"></i>
+            Batch Genealogy Scraper
+        </h2>
+        
+        <p class="lead mb-4">
+            Recursively collect genealogical data from Wikidata and store it in our database for faster access and analysis.
+        </p>
+        
+        <div class="row mb-5">
+            <div class="col-md-4">
+                <div class="card border-primary mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <i class="fas fa-users mr-2"></i>
+                        People in Database
+                    </div>
+                    <div class="card-body text-center">
+                        <h1 class="card-title">{{ stats.people_count }}</h1>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-success mb-3">
+                    <div class="card-header bg-success text-white">
+                        <i class="fas fa-link mr-2"></i>
+                        Relationships
+                    </div>
+                    <div class="card-body text-center">
+                        <h1 class="card-title">{{ stats.relationship_count }}</h1>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-info mb-3">
+                    <div class="card-header bg-info text-white">
+                        <i class="fas fa-briefcase mr-2"></i>
+                        Occupations
+                    </div>
+                    <div class="card-body text-center">
+                        <h1 class="card-title">{{ stats.occupation_count }}</h1>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-5">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="fas fa-play-circle mr-2"></i>
+                    Start New Batch Job
+                </h4>
+            </div>
+            <div class="card-body">
+                <form id="batchForm">
+                    <div class="form-group">
+                        <label for="searchType">Search Type</label>
+                        <select class="form-control" id="searchType">
+                            <option value="entity">Wikidata Entity ID</option>
+                            <option value="query">Search Query</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group" id="entityIdGroup">
+                        <label for="entityId">Wikidata Entity ID</label>
+                        <input type="text" class="form-control" id="entityId" 
+                               placeholder="E.g., Q9682 (Elizabeth II)">
+                        <small class="form-text text-muted">
+                            Enter the Wikidata Q-ID for the person to start scraping from.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group" id="queryGroup" style="display: none;">
+                        <label for="query">Search Query</label>
+                        <input type="text" class="form-control" id="query" 
+                               placeholder="E.g., Elizabeth II">
+                        <small class="form-text text-muted">
+                            Enter a name to search for in Wikidata. The first result will be used.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="maxDepth">Maximum Depth</label>
+                        <select class="form-control" id="maxDepth">
+                            <option value="0">0 - Only the person</option>
+                            <option value="1">1 - Person and immediate relations</option>
+                            <option value="2" selected>2 - Person, relations, and their relations</option>
+                            <option value="3">3 - Three generations (large job)</option>
+                            <option value="4">4 - Four generations (very large job)</option>
+                        </select>
+                        <small class="form-text text-muted">
+                            Higher depths will collect more data but take longer to complete.
+                        </small>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-play mr-1"></i>
+                        Start Batch Job
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <h3 class="mb-3">
+            <i class="fas fa-tasks text-primary mr-2"></i>
+            Batch Jobs
+        </h3>
+        
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="thead-dark">
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th>Results</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsTable">
+                    {% if jobs %}
+                        {% for job in jobs %}
+                        <tr>
+                            <td>{{ job.id }}</td>
+                            <td>
+                                {% if job.entity_id %}
+                                <a href="{{ url_for('details', entity_id=job.entity_id) }}">
+                                    {{ job.entity_id }}
+                                </a>
+                                {% else %}
+                                "{{ job.query }}"
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if job.status == 'starting' %}
+                                <span class="badge badge-warning">Starting</span>
+                                {% elif job.status == 'running' %}
+                                <span class="badge badge-primary">Running</span>
+                                {% elif job.status == 'completed' %}
+                                <span class="badge badge-success">Completed</span>
+                                {% elif job.status == 'failed' %}
+                                <span class="badge badge-danger">Failed</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ job.started }}</td>
+                            <td>{{ job.finished or '-' }}</td>
+                            <td>
+                                {% if job.stats %}
+                                <button class="btn btn-sm btn-info" data-toggle="modal" data-target="#statsModal-{{ job.id }}">
+                                    <i class="fas fa-chart-bar mr-1"></i>
+                                    View Stats
+                                </button>
+                                
+                                <!-- Stats Modal -->
+                                <div class="modal fade" id="statsModal-{{ job.id }}" tabindex="-1" role="dialog" aria-labelledby="statsModalLabel-{{ job.id }}" aria-hidden="true">
+                                    <div class="modal-dialog" role="document">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title" id="statsModalLabel-{{ job.id }}">Job Stats: {{ job.id }}</h5>
+                                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                                    <span aria-hidden="true">&times;</span>
+                                                </button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <ul class="list-group">
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        People Processed
+                                                        <span class="badge badge-primary badge-pill">{{ job.stats.people_processed }}</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        People Added
+                                                        <span class="badge badge-success badge-pill">{{ job.stats.people_added }}</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        People Updated
+                                                        <span class="badge badge-info badge-pill">{{ job.stats.people_updated }}</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Relationships Added
+                                                        <span class="badge badge-secondary badge-pill">{{ job.stats.relationships_added }}</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        API Calls
+                                                        <span class="badge badge-dark badge-pill">{{ job.stats.api_calls }}</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Errors
+                                                        <span class="badge badge-danger badge-pill">{{ job.stats.errors }}</span>
+                                                    </li>
+                                                </ul>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% elif job.status == 'failed' %}
+                                <span class="text-danger">{{ job.error }}</span>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center">No batch jobs have been run yet.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Toggle between Entity ID and Query search types
+        $('#searchType').on('change', function() {
+            if ($(this).val() === 'entity') {
+                $('#entityIdGroup').show();
+                $('#queryGroup').hide();
+            } else {
+                $('#entityIdGroup').hide();
+                $('#queryGroup').show();
+            }
+        });
+        
+        // Handle batch job form submission
+        $('#batchForm').on('submit', function(event) {
+            event.preventDefault();
+            
+            const searchType = $('#searchType').val();
+            const entityId = $('#entityId').val();
+            const query = $('#query').val();
+            const maxDepth = $('#maxDepth').val();
+            
+            // Validate form
+            if (searchType === 'entity' && !entityId) {
+                alert('Please enter a Wikidata Entity ID.');
+                return;
+            }
+            
+            if (searchType === 'query' && !query) {
+                alert('Please enter a search query.');
+                return;
+            }
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('max_depth', maxDepth);
+            
+            if (searchType === 'entity') {
+                formData.append('entity_id', entityId);
+            } else {
+                formData.append('query', query);
+            }
+            
+            // Start batch job
+            fetch("{{ url_for('api_batch_start') }}", {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    alert('Batch job started successfully! Job ID: ' + data.job_id);
+                    // Reload page to show the new job
+                    window.location.reload();
+                } else {
+                    alert('Error starting batch job: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        });
+        
+        // Auto-refresh running jobs every 5 seconds
+        const hasRunningJobs = {{ 'true' if any(job.status == 'running' or job.status == 'starting' for job in jobs) else 'false' }};
+        
+        if (hasRunningJobs) {
+            setInterval(function() {
+                window.location.reload();
+            }, 5000);
+        }
+    });
+</script>
+{% endblock %}

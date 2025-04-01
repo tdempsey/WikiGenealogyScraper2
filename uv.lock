@@ -564,6 +564,7 @@ dependencies = [
     { name = "gunicorn" },
     { name = "psycopg2-binary" },
     { name = "requests" },
+    { name = "sqlalchemy" },
     { name = "trafilatura" },
 ]
 
@@ -576,6 +577,7 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "requests", specifier = ">=2.32.3" },
+    { name = "sqlalchemy", specifier = ">=2.0.39" },
     { name = "trafilatura", specifier = ">=2.0.0" },
 ]
 

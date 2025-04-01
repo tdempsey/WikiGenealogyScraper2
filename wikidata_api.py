@@ -1,9 +1,18 @@
+"""
+Wikidata API module for retrieving genealogy data.
+
+This module provides functions to:
+1. Search for people in Wikidata
+2. Get detailed information about a person
+3. Get family relations for a person
+"""
 import requests
 import logging
-from urllib.parse import quote
+import json
+from datetime import datetime
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Wikidata API endpoints
@@ -23,58 +32,69 @@ def search_person(query, page=1, limit=10):
         dict: Search results with pagination information
     """
     try:
-        # Calculate offset based on page number
+        # Calculate offset for pagination
         offset = (page - 1) * limit
         
-        # Search for entities that are instances of human (Q5)
+        # Parameters for search
         params = {
-            'action': 'wbsearchentities',
-            'format': 'json',
-            'language': 'en',
-            'search': query,
-            'type': 'item',
-            'limit': limit,
-            'continue': offset
+            "action": "wbsearchentities",
+            "format": "json",
+            "language": "en",
+            "type": "item",
+            "search": query,
+            "limit": limit,
+            "continue": offset
         }
         
+        # Make the request
         response = requests.get(WIKIDATA_API_URL, params=params)
-        response.raise_for_status()
         data = response.json()
         
-        results = []
-        
-        # Post-process search results to filter for humans
-        for item in data.get('search', []):
-            entity_id = item.get('id')
-            
-            # Basic information
-            person = {
-                'id': entity_id,
-                'name': item.get('label', 'Unknown'),
-                'description': item.get('description', '')
+        # Check if search was successful
+        if 'search' not in data:
+            logger.warning(f"Search failed for query: {query}")
+            return {
+                "results": [],
+                "total": 0,
+                "page": page,
+                "limit": limit,
+                "pages": 0
             }
             
-            results.append(person)
-        
-        # The structure of Wikidata API response sometimes varies
-        # The 'total' might be in 'search-continue' or directly in 'searchinfo'
-        total_results = len(results)
-        search_continue = data.get('search-continue')
-        if search_continue and isinstance(search_continue, dict):
-            total_results = search_continue.get('total', total_results)
-        elif data.get('searchinfo') and isinstance(data.get('searchinfo'), dict):
-            total_results = data.get('searchinfo').get('totalhits', total_results)
+        # Get results and format them
+        results = []
+        for item in data['search']:
+            result = {
+                "id": item['id'],
+                "label": item.get('label', 'Unknown'),
+                "description": item.get('description', '')
+            }
+            results.append(result)
             
+        # Calculate pagination info
+        search_continue = data.get('search-continue', offset + len(results))
+        total_results = search_continue + (0 if len(results) < limit else 1)  # Estimate total if more results exist
+        total_pages = (total_results + limit - 1) // limit
+        
+        # Return formatted results
         return {
-            'results': results,
-            'total': total_results,
-            'page': page,
-            'limit': limit
+            "results": results,
+            "total": total_results,
+            "page": page,
+            "limit": limit,
+            "pages": total_pages
         }
         
     except Exception as e:
         logger.error(f"Error searching Wikidata: {str(e)}")
-        raise
+        return {
+            "results": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "pages": 0,
+            "error": str(e)
+        }
 
 def get_person_details(entity_id):
     """
@@ -87,134 +107,168 @@ def get_person_details(entity_id):
         dict: Person details
     """
     try:
-        # Get entity data from Wikidata API
+        # Parameters for getting entity data
         params = {
-            'action': 'wbgetentities',
-            'format': 'json',
-            'ids': entity_id,
-            'languages': 'en',
-            'props': 'labels|descriptions|claims|sitelinks'
+            "action": "wbgetentities",
+            "format": "json",
+            "ids": entity_id,
+            "languages": "en"
         }
         
+        # Make the request
         response = requests.get(WIKIDATA_API_URL, params=params)
-        response.raise_for_status()
         data = response.json()
         
-        # Extract entity data
-        entity_data = data.get('entities', {}).get(entity_id, {})
+        # Check if entity was found
+        if 'entities' not in data or entity_id not in data['entities']:
+            logger.warning(f"Entity not found: {entity_id}")
+            return None
+            
+        entity = data['entities'][entity_id]
         
-        if not entity_data:
-            return {'error': 'Person not found'}
+        # Property IDs for person data
+        PROP_INSTANCE_OF = "P31"
+        PROP_HUMAN = "Q5"
+        PROP_NAME = "labels"
+        PROP_DESCRIPTION = "descriptions"
+        PROP_BIRTH_DATE = "P569"
+        PROP_DEATH_DATE = "P570"
+        PROP_GENDER = "P21"
+        PROP_IMAGE = "P18"
+        PROP_BIRTH_PLACE = "P19"
+        PROP_OCCUPATION = "P106"
         
-        # Get basic information
-        labels = entity_data.get('labels', {})
-        descriptions = entity_data.get('descriptions', {})
-        claims = entity_data.get('claims', {})
+        # Check if entity is a person
+        is_human = False
+        if PROP_INSTANCE_OF in entity.get('claims', {}):
+            for claim in entity['claims'][PROP_INSTANCE_OF]:
+                if claim.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id') == PROP_HUMAN:
+                    is_human = True
+                    break
         
-        # Extract commonly needed data
+        if not is_human:
+            logger.warning(f"Entity is not a human: {entity_id}")
+            # Continue anyway, might be a person even if not explicitly marked as such
+        
+        # Extract person data
         person = {
-            'id': entity_id,
-            'name': labels.get('en', {}).get('value', 'Unknown'),
-            'description': descriptions.get('en', {}).get('value', '')
+            "id": entity_id,
+            "name": entity.get(PROP_NAME, {}).get('en', {}).get('value', 'Unknown'),
+            "bio": entity.get(PROP_DESCRIPTION, {}).get('en', {}).get('value', ''),
+            "birth_date": None,
+            "death_date": None,
+            "gender": None,
+            "image_url": None,
+            "birth_place": None,
+            "occupations": []
         }
         
-        # Extract birth date (P569)
-        if 'P569' in claims:
-            try:
-                time_value = claims['P569'][0]['mainsnak']['datavalue']['value']['time']
-                # Format: +YYYY-MM-DDT00:00:00Z
-                # Remove the + and the time part
-                if time_value.startswith('+'):
-                    time_value = time_value[1:]
-                person['birth_date'] = time_value.split('T')[0]
-            except (KeyError, IndexError):
-                person['birth_date'] = None
+        # Extract claims data
+        claims = entity.get('claims', {})
         
-        # Extract death date (P570)
-        if 'P570' in claims:
-            try:
-                time_value = claims['P570'][0]['mainsnak']['datavalue']['value']['time']
-                if time_value.startswith('+'):
-                    time_value = time_value[1:]
-                person['death_date'] = time_value.split('T')[0]
-            except (KeyError, IndexError):
-                person['death_date'] = None
+        # Birth date
+        if PROP_BIRTH_DATE in claims:
+            birth_date = claims[PROP_BIRTH_DATE][0].get('mainsnak', {}).get('datavalue', {}).get('value', {})
+            if birth_date and 'time' in birth_date:
+                # Format: +1936-10-15T00:00:00Z
+                time_str = birth_date['time']
+                # Remove + or - at the beginning and Z at the end
+                time_str = time_str[1:] if time_str.startswith('+') else time_str
+                time_str = time_str.replace('Z', '')
+                try:
+                    person['birth_date'] = time_str
+                except ValueError:
+                    logger.warning(f"Cannot parse birth date: {time_str}")
         
-        # Extract gender (P21)
-        if 'P21' in claims:
-            try:
-                gender_id = claims['P21'][0]['mainsnak']['datavalue']['value']['id']
+        # Death date
+        if PROP_DEATH_DATE in claims:
+            death_date = claims[PROP_DEATH_DATE][0].get('mainsnak', {}).get('datavalue', {}).get('value', {})
+            if death_date and 'time' in death_date:
+                # Format: +1936-10-15T00:00:00Z
+                time_str = death_date['time']
+                # Remove + or - at the beginning and Z at the end
+                time_str = time_str[1:] if time_str.startswith('+') else time_str
+                time_str = time_str.replace('Z', '')
+                try:
+                    person['death_date'] = time_str
+                except ValueError:
+                    logger.warning(f"Cannot parse death date: {time_str}")
+        
+        # Gender
+        if PROP_GENDER in claims:
+            gender_id = claims[PROP_GENDER][0].get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id')
+            if gender_id:
+                # Q6581097: male, Q6581072: female
                 if gender_id == 'Q6581097':
                     person['gender'] = 'male'
                 elif gender_id == 'Q6581072':
                     person['gender'] = 'female'
                 else:
                     person['gender'] = 'other'
-            except (KeyError, IndexError):
-                person['gender'] = None
         
-        # Extract image (P18)
-        if 'P18' in claims:
-            try:
-                image_filename = claims['P18'][0]['mainsnak']['datavalue']['value']
-                # Convert filename to Wikimedia Commons URL
+        # Image
+        if PROP_IMAGE in claims:
+            image_filename = claims[PROP_IMAGE][0].get('mainsnak', {}).get('datavalue', {}).get('value')
+            if image_filename:
+                # Convert filename to URL using Wikimedia Commons API
                 image_filename = image_filename.replace(' ', '_')
-                # Calculate MD5 hash prefix for Commons URL structure
+                
+                # Create an MD5 hash and use it to construct the URL
                 import hashlib
                 md5_hash = hashlib.md5(image_filename.encode('utf-8')).hexdigest()
-                person['image_url'] = f"https://commons.wikimedia.org/wiki/Special:FilePath/{image_filename}"
-            except (KeyError, IndexError):
-                person['image_url'] = None
+                
+                # Format: https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Example.jpg/200px-Example.jpg
+                prefix = md5_hash[0]
+                prefix2 = md5_hash[0:2]
+                image_url = f"https://upload.wikimedia.org/wikipedia/commons/thumb/{prefix}/{prefix2}/{image_filename}/200px-{image_filename}"
+                person['image_url'] = image_url
         
-        # Extract place of birth (P19)
-        if 'P19' in claims:
-            try:
-                birth_place_id = claims['P19'][0]['mainsnak']['datavalue']['value']['id']
+        # Birth place
+        if PROP_BIRTH_PLACE in claims:
+            birth_place_id = claims[PROP_BIRTH_PLACE][0].get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id')
+            if birth_place_id:
+                # Get place name
                 place_params = {
-                    'action': 'wbgetentities',
-                    'format': 'json',
-                    'ids': birth_place_id,
-                    'languages': 'en',
-                    'props': 'labels'
+                    "action": "wbgetentities",
+                    "format": "json",
+                    "ids": birth_place_id,
+                    "languages": "en"
                 }
+                
                 place_response = requests.get(WIKIDATA_API_URL, params=place_params)
                 place_data = place_response.json()
-                person['birth_place'] = place_data.get('entities', {}).get(birth_place_id, {}).get('labels', {}).get('en', {}).get('value')
-            except (KeyError, IndexError, Exception):
-                person['birth_place'] = None
+                
+                if 'entities' in place_data and birth_place_id in place_data['entities']:
+                    place_entity = place_data['entities'][birth_place_id]
+                    person['birth_place'] = place_entity.get('labels', {}).get('en', {}).get('value')
         
-        # Extract occupations (P106)
-        if 'P106' in claims:
-            try:
-                occupation_ids = [claim['mainsnak']['datavalue']['value']['id'] for claim in claims['P106'] if 'datavalue' in claim['mainsnak']]
-                occupations = []
-                
-                if occupation_ids:
-                    # Get occupation labels in batches
-                    occ_params = {
-                        'action': 'wbgetentities',
-                        'format': 'json',
-                        'ids': '|'.join(occupation_ids[:50]),  # Limit to 50 IDs per request
-                        'languages': 'en',
-                        'props': 'labels'
+        # Occupations
+        if PROP_OCCUPATION in claims:
+            for occupation_claim in claims[PROP_OCCUPATION]:
+                occupation_id = occupation_claim.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id')
+                if occupation_id:
+                    # Get occupation name
+                    occupation_params = {
+                        "action": "wbgetentities",
+                        "format": "json",
+                        "ids": occupation_id,
+                        "languages": "en"
                     }
-                    occ_response = requests.get(WIKIDATA_API_URL, params=occ_params)
-                    occ_data = occ_response.json()
                     
-                    for occ_id in occupation_ids:
-                        occ_label = occ_data.get('entities', {}).get(occ_id, {}).get('labels', {}).get('en', {}).get('value')
-                        if occ_label:
-                            occupations.append(occ_label)
-                
-                person['occupations'] = occupations
-            except (KeyError, Exception):
-                person['occupations'] = []
+                    occupation_response = requests.get(WIKIDATA_API_URL, params=occupation_params)
+                    occupation_data = occupation_response.json()
+                    
+                    if 'entities' in occupation_data and occupation_id in occupation_data['entities']:
+                        occupation_entity = occupation_data['entities'][occupation_id]
+                        occupation_name = occupation_entity.get('labels', {}).get('en', {}).get('value')
+                        if occupation_name and occupation_name not in person['occupations']:
+                            person['occupations'].append(occupation_name)
         
         return person
-    
+        
     except Exception as e:
-        logger.error(f"Error getting person details from Wikidata: {str(e)}")
-        raise
+        logger.error(f"Error getting person details: {str(e)}")
+        return None
 
 def get_family_relations(entity_id):
     """
@@ -227,185 +281,152 @@ def get_family_relations(entity_id):
         dict: Family relations categorized by type
     """
     try:
-        # Helper method to execute SPARQL query and parse results
-        def execute_wikidata_query(query):
-            headers = {
-                'Accept': 'application/sparql-results+json',
-                'User-Agent': 'WikidataGenealogyApp/1.0'
-            }
-            
-            params = {
-                'query': query,
-                'format': 'json'
-            }
-            
-            response = requests.get(WIKIDATA_SPARQL_URL, headers=headers, params=params)
-            response.raise_for_status()
-            return response.json().get('results', {}).get('bindings', [])
-            
-        # Helper method to process a binding into a relation object
-        def process_binding(binding, relation_type):
-            relation_uri = binding.get('relation', {}).get('value', '')
-            if not relation_uri:
-                return None
-                
-            # Extract Q-ID from URI (e.g., http://www.wikidata.org/entity/Q123 -> Q123)
-            relation_id = relation_uri.split('/')[-1]
-            
-            # Create relation object
-            relation = {
-                'id': relation_id,
-                'name': binding.get('relationLabel', {}).get('value', 'Unknown'),
-                'type': relation_type,
-            }
-            
-            # Add optional attributes if available
-            if 'relationBirth' in binding:
-                birth_date = binding['relationBirth']['value']
-                if birth_date.startswith('+'):
-                    birth_date = birth_date[1:]
-                relation['birth_date'] = birth_date.split('T')[0]
-                
-            if 'relationDeath' in binding:
-                death_date = binding['relationDeath']['value']
-                if death_date.startswith('+'):
-                    death_date = death_date[1:]
-                relation['death_date'] = death_date.split('T')[0]
-                
-            if 'relationGender' in binding:
-                relation['gender'] = binding['relationGender']['value'].lower()
-                
-            if 'relationDescription' in binding:
-                relation['description'] = binding['relationDescription']['value']
-                
-            return relation
-            
-        # Create simpler individual queries for each relationship type
-        
-        # Parents query (mother + father)
-        parents_query = f"""
-        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Parents
-          {{ wd:{entity_id} wdt:P22 ?relation }} UNION {{ wd:{entity_id} wdt:P25 ?relation }}
-          
-          # Get additional details about the relation
-          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
-          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
-          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
-          OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
-          
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-        }}
-        """
-        
-        # Children query
-        children_query = f"""
-        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Children - person is parent of relation
-          wd:{entity_id} wdt:P40 ?relation .
-          
-          # Get additional details about the relation
-          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
-          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
-          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
-          OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
-          
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-        }}
-        """
-        
-        # Spouses query
-        spouses_query = f"""
-        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Spouses (bi-directional)
-          {{ wd:{entity_id} wdt:P26 ?relation }} UNION {{ ?relation wdt:P26 wd:{entity_id} }}
-          
-          # Get additional details about the relation
-          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
-          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
-          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
-          OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
-          
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-        }}
-        """
-        
-        # Siblings query
-        siblings_query = f"""
-        SELECT ?relation ?relationLabel ?relationBirth ?relationDeath ?relationGender ?relationDescription WHERE {{
-          # Siblings (bi-directional)
-          {{ wd:{entity_id} wdt:P3373 ?relation }} UNION {{ ?relation wdt:P3373 wd:{entity_id} }}
-          
-          # Get additional details about the relation
-          OPTIONAL {{ ?relation wdt:P569 ?relationBirth . }}
-          OPTIONAL {{ ?relation wdt:P570 ?relationDeath . }}
-          OPTIONAL {{ ?relation wdt:P21 ?genderEntity .
-                     ?genderEntity rdfs:label ?relationGender . 
-                     FILTER(LANG(?relationGender) = "en") }}
-          OPTIONAL {{ ?relation schema:description ?relationDescription . 
-                     FILTER(LANG(?relationDescription) = "en") }}
-          
-          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-        }}
-        """
-        
-        # Execute the queries separately and combine results
-        parents_results = execute_wikidata_query(parents_query)
-        children_results = execute_wikidata_query(children_query)
-        spouses_results = execute_wikidata_query(spouses_query)
-        siblings_results = execute_wikidata_query(siblings_query)
-        
-        # Initialize the result dictionary
-        relations = {
-            'parents': [],
-            'children': [],
-            'spouses': [],
-            'siblings': []
+        # Initialize result
+        family_relations = {
+            "parents": [],
+            "children": [],
+            "spouses": [],
+            "siblings": []
         }
         
-        # Process parents
-        seen_parent_ids = set()
-        for binding in parents_results:
-            relation = process_binding(binding, 'parent')
-            if relation and relation['id'] not in seen_parent_ids:
-                seen_parent_ids.add(relation['id'])
-                relations['parents'].append(relation)
+        # Helper functions
+        def execute_wikidata_query(query):
+            """Execute a SPARQL query on Wikidata and return results."""
+            params = {
+                "format": "json",
+                "query": query
+            }
+            headers = {
+                "Accept": "application/sparql-results+json",
+                "User-Agent": "GenealogyResearchTool/1.0"
+            }
+            
+            response = requests.get(WIKIDATA_SPARQL_URL, params=params, headers=headers)
+            
+            if response.status_code != 200:
+                logger.warning(f"SPARQL query failed with status {response.status_code}: {response.text}")
+                return None
+                
+            return response.json()
         
-        # Process children
-        seen_child_ids = set()
-        for binding in children_results:
-            relation = process_binding(binding, 'child')
-            if relation and relation['id'] not in seen_child_ids:
-                seen_child_ids.add(relation['id'])
-                relations['children'].append(relation)
+        def process_binding(binding, relation_type):
+            """Process a SPARQL binding to extract relation data."""
+            if 'person' not in binding or 'personLabel' not in binding:
+                return None
+                
+            person_uri = binding['person']['value']
+            person_label = binding.get('personLabel', {}).get('value', 'Unknown')
+            
+            # Extract entity ID from URI (format: http://www.wikidata.org/entity/Q123)
+            entity_id = person_uri.split('/')[-1]
+            
+            # Extract birth and death dates if available
+            birth_date = binding.get('birth', {}).get('value') if 'birth' in binding else None
+            death_date = binding.get('death', {}).get('value') if 'death' in binding else None
+            image_url = binding.get('image', {}).get('value') if 'image' in binding else None
+            
+            # Format dates if present
+            if birth_date:
+                try:
+                    birth_date = datetime.fromisoformat(birth_date.replace('Z', '+00:00')).isoformat()
+                except ValueError:
+                    birth_date = None
+                    
+            if death_date:
+                try:
+                    death_date = datetime.fromisoformat(death_date.replace('Z', '+00:00')).isoformat()
+                except ValueError:
+                    death_date = None
+            
+            return {
+                "id": entity_id,
+                "name": person_label,
+                "birth_date": birth_date,
+                "death_date": death_date,
+                "image_url": image_url
+            }
         
-        # Process spouses
-        seen_spouse_ids = set()
-        for binding in spouses_results:
-            relation = process_binding(binding, 'spouse')
-            if relation and relation['id'] not in seen_spouse_ids:
-                seen_spouse_ids.add(relation['id'])
-                relations['spouses'].append(relation)
+        # --- Parents ---
+        parents_query = f"""
+        SELECT ?person ?personLabel ?birth ?death ?image WHERE {{
+          wd:{entity_id} wdt:P22|wdt:P25 ?person .
+          OPTIONAL {{ ?person wdt:P569 ?birth . }}
+          OPTIONAL {{ ?person wdt:P570 ?death . }}
+          OPTIONAL {{ ?person wdt:P18 ?image . }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
         
-        # Process siblings
-        seen_sibling_ids = set()
-        for binding in siblings_results:
-            relation = process_binding(binding, 'sibling')
-            if relation and relation['id'] not in seen_sibling_ids:
-                seen_sibling_ids.add(relation['id'])
-                relations['siblings'].append(relation)
+        parents_data = execute_wikidata_query(parents_query)
+        if parents_data and 'results' in parents_data and 'bindings' in parents_data['results']:
+            for binding in parents_data['results']['bindings']:
+                parent = process_binding(binding, 'parent')
+                if parent:
+                    family_relations["parents"].append(parent)
         
-        return relations
+        # --- Children ---
+        children_query = f"""
+        SELECT ?person ?personLabel ?birth ?death ?image WHERE {{
+          ?person wdt:P22|wdt:P25 wd:{entity_id} .
+          OPTIONAL {{ ?person wdt:P569 ?birth . }}
+          OPTIONAL {{ ?person wdt:P570 ?death . }}
+          OPTIONAL {{ ?person wdt:P18 ?image . }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        children_data = execute_wikidata_query(children_query)
+        if children_data and 'results' in children_data and 'bindings' in children_data['results']:
+            for binding in children_data['results']['bindings']:
+                child = process_binding(binding, 'child')
+                if child:
+                    family_relations["children"].append(child)
+        
+        # --- Spouses ---
+        spouses_query = f"""
+        SELECT ?person ?personLabel ?birth ?death ?image WHERE {{
+          wd:{entity_id} wdt:P26 ?person .
+          OPTIONAL {{ ?person wdt:P569 ?birth . }}
+          OPTIONAL {{ ?person wdt:P570 ?death . }}
+          OPTIONAL {{ ?person wdt:P18 ?image . }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        spouses_data = execute_wikidata_query(spouses_query)
+        if spouses_data and 'results' in spouses_data and 'bindings' in spouses_data['results']:
+            for binding in spouses_data['results']['bindings']:
+                spouse = process_binding(binding, 'spouse')
+                if spouse:
+                    family_relations["spouses"].append(spouse)
+        
+        # --- Siblings ---
+        siblings_query = f"""
+        SELECT ?person ?personLabel ?birth ?death ?image WHERE {{
+          ?parent wdt:P22|wdt:P25 wd:{entity_id} .
+          ?parent wdt:P22|wdt:P25 ?person .
+          FILTER(?person != wd:{entity_id})
+          OPTIONAL {{ ?person wdt:P569 ?birth . }}
+          OPTIONAL {{ ?person wdt:P570 ?death . }}
+          OPTIONAL {{ ?person wdt:P18 ?image . }}
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+        }}
+        """
+        
+        siblings_data = execute_wikidata_query(siblings_query)
+        if siblings_data and 'results' in siblings_data and 'bindings' in siblings_data['results']:
+            for binding in siblings_data['results']['bindings']:
+                sibling = process_binding(binding, 'sibling')
+                if sibling:
+                    family_relations["siblings"].append(sibling)
+        
+        return family_relations
         
     except Exception as e:
-        logger.error(f"Error getting family relations from Wikidata: {str(e)}")
-        raise
+        logger.error(f"Error getting family relations: {str(e)}")
+        return {
+            "parents": [],
+            "children": [],
+            "spouses": [],
+            "siblings": []
+        }

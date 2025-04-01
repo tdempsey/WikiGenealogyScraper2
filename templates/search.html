@@ -1,60 +1,47 @@
 {% extends "layout.html" %}
 
-{% block title %} - Search{% endblock %}
+{% block title %}Search People - Genealogy Research Tool{% endblock %}
 
 {% block content %}
 <div class="row">
-    <div class="col-md-8 mx-auto">
-        <h1 class="mb-4">Search for People</h1>
+    <div class="col-md-12">
+        <h2 class="mb-4">
+            <i class="fas fa-search text-primary mr-2"></i>
+            Search People
+        </h2>
         
-        <div class="search-container mb-5">
-            <form id="search-form" class="mb-4">
-                <div class="input-group input-group-lg">
-                    <input type="text" class="form-control" id="search-input" 
-                           placeholder="Enter a name (e.g., Albert Einstein, Queen Victoria)" 
-                           aria-label="Search query">
-                    <button class="btn btn-primary" type="submit">
-                        <i class="fas fa-search me-2"></i>Search
+        <p class="lead mb-4">
+            Search for historical figures or family members using Wikidata's comprehensive database.
+        </p>
+        
+        <form id="searchForm" class="mb-5">
+            <div class="input-group">
+                <input type="text" id="searchInput" class="form-control form-control-lg" 
+                       placeholder="Enter a name (e.g., 'Elizabeth II', 'Shakespeare')" 
+                       value="{{ query }}" required>
+                <div class="input-group-append">
+                    <button class="btn btn-primary btn-lg" type="submit">
+                        <i class="fas fa-search"></i> Search
                     </button>
                 </div>
-            </form>
-            
-            <div class="search-tips mb-4">
-                <h5>Search Tips:</h5>
-                <ul>
-                    <li>Use full names for better results (e.g., "Albert Einstein" instead of just "Einstein")</li>
-                    <li>Include titles for royalty or nobility (e.g., "Queen Elizabeth II", "King Henry VIII")</li>
-                    <li>For common names, add identifying information (e.g., "George Washington President")</li>
-                </ul>
             </div>
-        </div>
+        </form>
         
-        <div id="loading-indicator" class="text-center d-none">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+        <div id="searchResults">
+            <div class="text-center" id="loadingIndicator" style="display: none;">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-2">Searching Wikidata...</p>
             </div>
-            <p class="mt-2">Searching Wikidata...</p>
-        </div>
-        
-        <div id="results-container" class="d-none">
-            <h2 id="results-heading">Search Results</h2>
-            <div id="results-list" class="mt-4"></div>
             
-            <nav aria-label="Search results pagination">
-                <ul class="pagination justify-content-center mt-4" id="pagination">
-                    <!-- Pagination will be inserted here by JavaScript -->
-                </ul>
-            </nav>
-        </div>
-        
-        <div id="no-results" class="alert alert-info d-none" role="alert">
-            <i class="fas fa-info-circle me-2"></i>
-            No results found. Please try a different search term.
-        </div>
-        
-        <div id="error-message" class="alert alert-danger d-none" role="alert">
-            <i class="fas fa-exclamation-triangle me-2"></i>
-            <span id="error-text"></span>
+            <div id="resultsContainer">
+                <!-- Search results will be displayed here -->
+            </div>
+            
+            <div id="pagination" class="mt-4">
+                <!-- Pagination controls will be displayed here -->
+            </div>
         </div>
     </div>
 </div>
@@ -63,15 +50,27 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/search.js') }}"></script>
 <script>
-    // Initialize search with query parameter if present
-    document.addEventListener('DOMContentLoaded', function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const query = urlParams.get('query');
+    // Initialize search when the page loads
+    $(document).ready(function() {
+        const queryParam = "{{ query }}";
+        const pageParam = {{ page }};
         
-        if (query) {
-            document.getElementById('search-input').value = query;
-            performSearch(query, 1);
+        if (queryParam) {
+            performSearch(queryParam, pageParam);
         }
+        
+        // Handle search form submission
+        $("#searchForm").submit(function(event) {
+            event.preventDefault();
+            const query = $("#searchInput").val().trim();
+            if (query) {
+                // Update URL with query parameter
+                const newUrl = "{{ url_for('search_page') }}?query=" + encodeURIComponent(query);
+                history.pushState({}, "", newUrl);
+                
+                performSearch(query, 1);
+            }
+        });
     });
 </script>
 {% endblock %}
